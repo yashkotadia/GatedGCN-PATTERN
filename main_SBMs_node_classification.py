@@ -99,16 +99,14 @@ def train_val_pipeline(MODEL_NAME, dataset, params, net_params, dirs):
     
     DATASET_NAME = dataset.name
     
-    if MODEL_NAME in ['GCN', 'GAT']:
-        if net_params['self_loop']:
-            print("[!] Adding graph self-loops for GCN/GAT models (central node trick).")
-            dataset._add_self_loops()
-    
     if MODEL_NAME in ['GatedGCN']:
         if net_params['pos_enc']:
             print("[!] Adding graph positional encoding.")
             dataset._add_positional_encodings(net_params['pos_enc_dim'])
             print('Time PE:',time.time()-start0)
+    else:
+        print("Only GatedGCN Supported")
+        exit(0)
         
     trainset, valset, testset = dataset.train, dataset.val, dataset.test
         
@@ -147,21 +145,13 @@ def train_val_pipeline(MODEL_NAME, dataset, params, net_params, dirs):
     epoch_train_losses, epoch_val_losses = [], []
     epoch_train_accs, epoch_val_accs = [], [] 
     
-    if MODEL_NAME in ['RingGNN', '3WLGNN']:
-        # import train functions specific for WL-GNNs
-        from train.train_SBMs_node_classification import train_epoch_dense as train_epoch, evaluate_network_dense as evaluate_network
-        
-        train_loader = DataLoader(trainset, shuffle=True, collate_fn=dataset.collate_dense_gnn)
-        val_loader = DataLoader(valset, shuffle=False, collate_fn=dataset.collate_dense_gnn)
-        test_loader = DataLoader(testset, shuffle=False, collate_fn=dataset.collate_dense_gnn)
-        
-    else:
-        # import train functions for all other GCNs
-        from train.train_SBMs_node_classification import train_epoch_sparse as train_epoch, evaluate_network_sparse as evaluate_network 
-        
-        train_loader = DataLoader(trainset, batch_size=params['batch_size'], shuffle=True, collate_fn=dataset.collate)
-        val_loader = DataLoader(valset, batch_size=params['batch_size'], shuffle=False, collate_fn=dataset.collate)
-        test_loader = DataLoader(testset, batch_size=params['batch_size'], shuffle=False, collate_fn=dataset.collate)
+    
+    # import train functions for all other GCNs
+    from train.train_SBMs_node_classification import train_epoch_sparse as train_epoch, evaluate_network_sparse as evaluate_network 
+    
+    train_loader = DataLoader(trainset, batch_size=params['batch_size'], shuffle=True, collate_fn=dataset.collate)
+    val_loader = DataLoader(valset, batch_size=params['batch_size'], shuffle=False, collate_fn=dataset.collate)
+    test_loader = DataLoader(testset, batch_size=params['batch_size'], shuffle=False, collate_fn=dataset.collate)
         
     # At any point you can hit Ctrl + C to break out of training early.
     try:
@@ -172,10 +162,7 @@ def train_val_pipeline(MODEL_NAME, dataset, params, net_params, dirs):
 
                 start = time.time()
 
-                if MODEL_NAME in ['RingGNN', '3WLGNN']: # since different batch training function for dense GNNs
-                    epoch_train_loss, epoch_train_acc, optimizer = train_epoch(model, optimizer, device, train_loader, epoch, params['batch_size'])
-                else:   # for all other models common train function
-                    epoch_train_loss, epoch_train_acc, optimizer = train_epoch(model, optimizer, device, train_loader, epoch)
+                epoch_train_loss, epoch_train_acc, optimizer = train_epoch(model, optimizer, device, train_loader, epoch)
                     
                 epoch_val_loss, epoch_val_acc = evaluate_network(model, device, val_loader, epoch)
                 _, epoch_test_acc = evaluate_network(model, device, test_loader, epoch)        
@@ -192,6 +179,7 @@ def train_val_pipeline(MODEL_NAME, dataset, params, net_params, dirs):
                     'val_acc': epoch_val_acc,
                     'test_acc': epoch_test_acc,
                     'learning_rate': optimizer.param_groups[0]['lr'],
+                    'epoch': epoch,
                     })
 
                 t.set_postfix(time=time.time()-start, lr=optimizer.param_groups[0]['lr'],
@@ -402,10 +390,6 @@ def main():
     # SBM
     net_params['in_dim'] = torch.unique(dataset.train[0][0].ndata['feat'],dim=0).size(0) # node_dim (feat is an integer)
     net_params['n_classes'] = torch.unique(dataset.train[0][1],dim=0).size(0)
-    
-    if MODEL_NAME == 'RingGNN':
-        num_nodes = [dataset.train[i][0].number_of_nodes() for i in range(len(dataset.train))]
-        net_params['avg_node_num'] = int(np.ceil(np.mean(num_nodes)))
 
     root_log_dir = out_dir + 'logs/' + MODEL_NAME + "_" + DATASET_NAME + "_GPU" + str(config['gpu']['id']) + "_" + time.strftime('%Hh%Mm%Ss_on_%b_%d_%Y')
     root_ckpt_dir = out_dir + 'checkpoints/' + MODEL_NAME + "_" + DATASET_NAME + "_GPU" + str(config['gpu']['id']) + "_" + time.strftime('%Hh%Mm%Ss_on_%b_%d_%Y')
